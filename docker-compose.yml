@@ -1,0 +1,21 @@
+services:
+  webhook:
+    image: node:22-bookworm
+    restart: unless-stopped
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    command: sh -c "npm install && npm run webhook"
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      FEISHU_WEBHOOK_URL: ${FEISHU_WEBHOOK_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://localhost:11434/v1/chat/completions}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3

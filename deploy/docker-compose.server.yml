@@ -1,0 +1,15 @@
+# 服务器部署覆盖配置：与现有 workspace Nginx 共享 Docker 网络。
+services:
+  webhook:
+    ports: !override
+      - "127.0.0.1:8787:8787"
+    networks:
+      default: {}
+      workspace:
+        aliases:
+          - devflow-webhook
+
+networks:
+  workspace:
+    external: true
+    name: workspace_default

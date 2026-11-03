@@ -1,0 +1,12 @@
+name: Devflow Notify
+on:
+  workflow_run:
+    workflows: [CI, AI Review]
+    types: [completed]
+permissions:
+  contents: read
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Send summary to Feishu through the webhook service"

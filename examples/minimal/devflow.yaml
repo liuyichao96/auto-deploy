@@ -1,0 +1,19 @@
+project:
+  name: minimal-example
+  defaultBranch: main
+commands:
+  install: npm install
+  lint: npm run lint
+  typecheck: npm run typecheck
+  test: npm test
+  build: npm run build
+preview:
+  command: npm run dev
+  port: 3000
+  healthPath: /
+  timeoutMs: 30000
+github:
+  mergeStrategy: auto_after_human_approval
+  requiredHumanApprovals: 1
+review:
+  provider: mock
