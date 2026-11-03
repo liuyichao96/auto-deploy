@@ -45,4 +45,16 @@ describe('webhook', () => {
     expect(notification).toMatchObject({ event: 'pr_created', project: 'demo', url: 'https://github.com/example/repo/pull/1' });
     expect(notification?.summary).not.toContain('full body');
   });
+
+  it('dispatches only a summary to an optional notifier', async () => {
+    const sent: unknown[] = [];
+    const { app } = createWebhookServer({ secret: 'secret', project: 'demo', notifier: { send: async notification => { sent.push(notification); } } });
+    await app.ready();
+    const body = JSON.stringify({ action: 'opened', pull_request: { title: 'Add feature', body: 'private diff', html_url: 'https://github.com/example/repo/pull/2' } });
+    const signature = 'sha256=' + crypto.createHmac('sha256', 'secret').update(body).digest('hex');
+    expect((await app.inject({ method: 'POST', url: '/webhooks/github', payload: body, headers: { 'x-hub-signature-256': signature, 'x-github-delivery': 'notify-1', 'x-github-event': 'pull_request', 'content-type': 'application/json' } })).statusCode).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).not.toContain('private diff');
+    await app.close();
+  });
 });

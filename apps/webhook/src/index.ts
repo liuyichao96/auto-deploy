@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { verifyWebhookSignature } from '../../../packages/github/src/index.js';
-import { FeishuWebhookSender, type FeishuEvent, type FeishuSender, type Notification } from '../../../packages/feishu/src/index.js';
+import { FeishuWebhookSender, ProjectFeishuRouter, type FeishuEvent, type FeishuSender, type Notification } from '../../../packages/feishu/src/index.js';
 
 export interface WebhookServerOptions { secret?: string; port?: number; auditFile?: string; notifier?: FeishuSender; project?: string; }
 
@@ -64,9 +64,7 @@ export function toNotification(event: string, payload: Record<string, unknown>, 
 
 if (process.argv[1]?.endsWith('index.ts')) {
   const port = Number(process.env.PORT ?? 8787);
-  const notifier = process.env.FEISHU_WEBHOOK_URL
-    ? new FeishuWebhookSender(process.env.FEISHU_WEBHOOK_URL, { auditFile: process.env.FEISHU_AUDIT_FILE })
-    : undefined;
+  const notifier = createNotifierFromEnv();
   const { app } = createWebhookServer({
     secret: process.env.GITHUB_WEBHOOK_SECRET,
     port,
@@ -75,4 +73,17 @@ if (process.argv[1]?.endsWith('index.ts')) {
     project: process.env.DEVFLOW_PROJECT
   });
   app.listen({ host: '0.0.0.0', port }).catch(error => { app.log.error(error); process.exit(1); });
+}
+
+function createNotifierFromEnv(): FeishuSender | undefined {
+  const options = { auditFile: process.env.FEISHU_AUDIT_FILE };
+  if (process.env.FEISHU_WEBHOOK_URL) return new FeishuWebhookSender(process.env.FEISHU_WEBHOOK_URL, options);
+  if (!process.env.FEISHU_PROJECT_GROUPS_JSON) return undefined;
+  try {
+    const groups = JSON.parse(process.env.FEISHU_PROJECT_GROUPS_JSON) as unknown;
+    if (!groups || typeof groups !== 'object') return undefined;
+    const senders: Record<string, FeishuSender> = {};
+    for (const [project, url] of Object.entries(groups as Record<string, unknown>)) if (typeof url === 'string' && url.startsWith('https://')) senders[project] = new FeishuWebhookSender(url, options);
+    return Object.keys(senders).length ? new ProjectFeishuRouter(senders) : undefined;
+  } catch { return undefined; }
 }
