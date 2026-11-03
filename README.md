@@ -17,7 +17,9 @@ npm run devflow -- preview
 
 ## 真实 GitHub / 飞书连接
 
-创建 GitHub App 并配置最小权限后，将 App ID、私钥和 Webhook secret 放入环境变量；飞书 Webhook 和 Review Provider 也只通过环境变量配置。仓库不会保存任何密钥。没有外部账号时可使用默认 mock Review 与飞书 dry-run。
+可以先只启用 GitHub Webhook 接收：服务会验签、去重并写入事件审计，不需要 GitHub App、飞书或 OpenAI 密钥。需要出站通知或 API 操作时，再通过环境变量配置 GitHub App、飞书 Webhook 和 Review Provider；仓库不会保存任何密钥。没有外部账号时可使用默认 mock Review 与飞书 dry-run。
+
+当前示例服务器的 Webhook 地址是 `http://43.142.20.161/devflow/webhooks/github`，健康检查是 `http://43.142.20.161/devflow/healthz`。正式环境请使用域名和 HTTPS。
 
 ## 文档
 
