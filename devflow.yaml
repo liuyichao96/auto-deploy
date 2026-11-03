@@ -1,0 +1,22 @@
+project:
+  name: auto-deploy
+  defaultBranch: main
+commands:
+  install: npm ci
+  lint: npm run lint
+  typecheck: npm run typecheck
+  test: npm test
+  build: npm run build
+preview:
+  command: npm run webhook
+  port: 8787
+  healthPath: /healthz
+  timeoutMs: 30000
+github:
+  mergeStrategy: auto_after_human_approval
+  requiredHumanApprovals: 1
+feishu:
+  enabled: false
+  projectGroups: {}
+review:
+  provider: mock
