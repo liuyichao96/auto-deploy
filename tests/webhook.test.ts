@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createWebhookServer } from '../apps/webhook/src/index.js';
+import { createWebhookServer, toNotification } from '../apps/webhook/src/index.js';
 
 describe('webhook', () => {
   it('rejects bad signatures and deduplicates delivery ids', async () => {
@@ -38,5 +38,11 @@ describe('webhook', () => {
     expect(record).not.toContain('do not log this');
     await app.close();
     await rm(root, { recursive: true, force: true });
+  });
+
+  it('converts GitHub events to a safe notification summary', () => {
+    const notification = toNotification('pull_request', { action: 'opened', pull_request: { title: 'Add feature', html_url: 'https://github.com/example/repo/pull/1', body: 'do not include the full body' } }, 'demo');
+    expect(notification).toMatchObject({ event: 'pr_created', project: 'demo', url: 'https://github.com/example/repo/pull/1' });
+    expect(notification?.summary).not.toContain('full body');
   });
 });

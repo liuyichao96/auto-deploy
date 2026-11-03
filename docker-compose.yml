@@ -12,7 +12,9 @@ services:
       PORT: "8787"
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_AUDIT_FILE: ${GITHUB_AUDIT_FILE:-/workspace/.devflow/webhook-audit.jsonl}
+      DEVFLOW_PROJECT: ${DEVFLOW_PROJECT:-devflow}
       FEISHU_WEBHOOK_URL: ${FEISHU_WEBHOOK_URL:-}
+      FEISHU_AUDIT_FILE: ${FEISHU_AUDIT_FILE:-/workspace/.devflow/feishu-audit.jsonl}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://localhost:11434/v1/chat/completions}
     healthcheck:
