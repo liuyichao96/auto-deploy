@@ -44,10 +44,16 @@ export class OpenAICompatibleProvider implements ReviewProvider {
   }
 }
 
+export class OllamaProvider extends OpenAICompatibleProvider {
+  name = 'ollama';
+  constructor(endpoint = 'http://127.0.0.1:11434/v1/chat/completions', model = 'llama3.1', timeoutMs = 30000) { super(endpoint, undefined, model, timeoutMs); }
+}
+
 export function reviewBlocksMerge(result: ReviewResult) { return result.blocksMerge || result.findings.some(f => f.severity === 'P0' || f.severity === 'P1'); }
 
-export function createReviewProvider(config: { provider: 'mock' | 'openai-compatible' | 'codex'; endpoint?: string; model?: string; timeoutMs?: number }, env: NodeJS.ProcessEnv = process.env): ReviewProvider {
+export function createReviewProvider(config: { provider: 'mock' | 'openai-compatible' | 'codex' | 'ollama'; endpoint?: string; model?: string; timeoutMs?: number }, env: NodeJS.ProcessEnv = process.env): ReviewProvider {
   if (config.provider === 'openai-compatible' && config.endpoint) return new OpenAICompatibleProvider(config.endpoint, env.OPENAI_API_KEY, config.model, config.timeoutMs);
+  if (config.provider === 'ollama') return new OllamaProvider(config.endpoint, config.model, config.timeoutMs);
   if (config.provider === 'codex') return new CodexGithubActionProvider();
   return new MockReviewProvider();
 }

@@ -9,7 +9,7 @@ export interface DevflowConfig {
   preview: { command: string; port: number; healthPath: string; timeoutMs: number };
   github: { owner?: string; repo?: string; mergeStrategy: MergeStrategy; requiredHumanApprovals: number };
   feishu: { enabled: boolean; projectGroups: Record<string, string> };
-  review: { provider: 'mock' | 'openai-compatible' | 'codex'; endpoint?: string; model?: string; timeoutMs?: number };
+  review: { provider: 'mock' | 'openai-compatible' | 'codex' | 'ollama'; endpoint?: string; model?: string; timeoutMs?: number };
 }
 
 export const defaultConfig: DevflowConfig = {
@@ -39,6 +39,7 @@ export function parseConfig(source: string): DevflowConfig {
   if (!config.project.name) throw new Error('project.name 不能为空');
   if (!Number.isInteger(config.preview.port) || config.preview.port < 1 || config.preview.port > 65535) throw new Error('preview.port 必须是 1-65535');
   if (!['manual', 'auto_after_human_approval', 'auto_after_ai_and_ci'].includes(config.github.mergeStrategy)) throw new Error('github.mergeStrategy 无效');
+  if (!['mock', 'openai-compatible', 'codex', 'ollama'].includes(config.review.provider)) throw new Error('review.provider 无效');
   if (config.review.timeoutMs !== undefined && (!Number.isInteger(config.review.timeoutMs) || config.review.timeoutMs < 100 || config.review.timeoutMs > 300000)) throw new Error('review.timeoutMs 必须是 100-300000');
   for (const [stage, command] of Object.entries(config.commands)) if (command) validateCommand(command, `commands.${stage}`);
   validateCommand(config.preview.command, 'preview.command');
@@ -83,9 +84,52 @@ export async function loadConfig(root = process.cwd()): Promise<DevflowConfig> {
   return parseConfig(await readFile(path.join(root, 'devflow.yaml'), 'utf8'));
 }
 
+export const reviewPublishTemplate = String.raw`name: AI Review Publish
+on:
+  workflow_run:
+    workflows: [AI Review]
+    types: [completed]
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+  checks: write
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: review-result
+          path: review-artifact
+          run-id: ${'${{'} github.event.workflow_run.id }}
+          github-token: ${'${{'} github.token }}
+      - uses: actions/github-script@v7
+        env:
+          REVIEW_FILE: review-artifact/review-result.json
+        with:
+          script: |
+            const fs = require('fs');
+            const result = JSON.parse(fs.readFileSync(process.env.REVIEW_FILE, 'utf8'));
+            const pull = context.payload.workflow_run.pull_requests?.[0];
+            if (!pull) return;
+            const findings = Array.isArray(result.findings) ? result.findings : [];
+            const conclusion = result.blocksMerge ? 'failure' : 'success';
+            const summary = String(result.summary || 'Review completed').slice(0, 10000);
+            await github.rest.checks.create({ owner: context.repo.owner, repo: context.repo.repo, name: 'AI Review', head_sha: context.payload.workflow_run.head_sha, status: 'completed', conclusion, output: { title: 'Devflow AI Review', summary } });
+            const marker = '<!-- devflow-ai-review -->';
+            const body = marker + '\\n## Devflow AI Review\\n\\n' + summary + '\\n\\n' + (findings.length ? findings.map(f => '- **' + String(f.severity || 'P3') + '** ' + String(f.file || 'unknown') + (f.line ? ':' + f.line : '') + ' — ' + String(f.suggestion || f.actual || '').slice(0, 1000)).join('\\n') : '未发现问题。');
+            const comments = await github.paginate(github.rest.issues.listComments, { owner: context.repo.owner, repo: context.repo.repo, issue_number: pull.number, per_page: 100 });
+            const previous = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+            if (previous) await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: previous.id, body });
+            else await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: pull.number, body });
+`;
+
 export const workflowTemplates: Record<string, string> = {
   'ci.yml': `name: CI\non:\n  pull_request:\n  push:\n    branches: [main]\npermissions:\n  contents: read\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: 22, cache: npm }\n      - run: npm ci\n      - run: npm run lint --if-present\n      - run: npm run typecheck --if-present\n      - run: npm test --if-present\n      - run: npm run build --if-present\n`,
-  'review.yml': `name: AI Review\non:\n  pull_request:\n    types: [opened, synchronize, reopened]\npermissions:\n  contents: read\njobs:\n  review:\n    if: github.event.pull_request.head.repo.fork == false\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with: { fetch-depth: 0 }\n      - uses: actions/setup-node@v4\n        with: { node-version: 22, cache: npm }\n      - run: npm ci\n      - run: npm run devflow -- review\n`,
+  'review.yml': `name: AI Review\non:\n  pull_request:\n    types: [opened, synchronize, reopened]\npermissions:\n  contents: read\njobs:\n  review:\n    if: github.event.pull_request.head.repo.fork == false\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with: { fetch-depth: 0 }\n      - uses: actions/setup-node@v4\n        with: { node-version: 22, cache: npm }\n      - run: npm ci\n      - name: Structured review\n        id: review\n        continue-on-error: true\n        run: npm run devflow -- review --output review-result.json\n      - name: Upload review result\n        if: always()\n        uses: actions/upload-artifact@v4\n        with:\n          name: review-result\n          path: review-result.json\n          if-no-files-found: error\n      - name: Fail when review blocks merge\n        if: steps.review.outcome == 'failure'\n        run: exit 1\n`,
+  'review-publish.yml': reviewPublishTemplate,
   'notify.yml': `name: Devflow Notify\non:\n  workflow_run:\n    workflows: [CI, AI Review]\n    types: [completed]\npermissions:\n  contents: read\njobs:\n  notify:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "Send summary to Feishu through the webhook service"\n`
 };
 
