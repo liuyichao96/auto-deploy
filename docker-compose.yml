@@ -5,7 +5,7 @@ services:
     working_dir: /workspace
     volumes:
       - .:/workspace
-    command: sh -c "npm install && npm run webhook"
+    command: sh -c "if [ ! -x node_modules/.bin/tsx ]; then npm ci --ignore-scripts; fi && npm run webhook"
     ports:
       - "8787:8787"
     environment:
