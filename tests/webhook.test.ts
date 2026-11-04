@@ -44,6 +44,12 @@ describe('webhook', () => {
     const notification = toNotification('pull_request', { action: 'opened', pull_request: { title: 'Add feature', html_url: 'https://github.com/example/repo/pull/1', body: 'do not include the full body' } }, 'demo');
     expect(notification).toMatchObject({ event: 'pr_created', project: 'demo', url: 'https://github.com/example/repo/pull/1' });
     expect(notification?.summary).not.toContain('full body');
+    expect(toNotification('pull_request', { action: 'synchronize', pull_request: { title: 'Add feature', html_url: 'https://github.com/example/repo/pull/1' } }, 'demo')?.event).toBe('pr_updated');
+  });
+
+  it('ignores workflow and check lifecycle events', () => {
+    expect(toNotification('workflow_run', { action: 'completed', workflow_run: { name: 'CI', html_url: 'https://github.com/example/run/1' } }, 'demo')).toBeUndefined();
+    expect(toNotification('check_run', { action: 'completed', check_run: { name: 'checks' } }, 'demo')).toBeUndefined();
   });
 
   it('dispatches only a summary to an optional notifier', async () => {

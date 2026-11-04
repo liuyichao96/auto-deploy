@@ -46,19 +46,20 @@ function parsePayload(raw: string): Record<string, unknown> {
 function stringValue(value: unknown): string | undefined { return typeof value === 'string' && value.length > 0 ? value : undefined; }
 
 export function toNotification(event: string, payload: Record<string, unknown>, project: string): Notification | undefined {
-  if (event === 'ping') return undefined;
-  const action = stringValue(payload.action) ?? stringValue((payload.workflow_run as Record<string, unknown> | undefined)?.conclusion) ?? 'updated';
+  // CI, check and workflow lifecycle events are intentionally ignored. A
+  // single pull request can produce several of those events, which creates
+  // noisy duplicate Feishu cards. PR updates are the user-facing signal.
+  if (event !== 'pull_request') return undefined;
+  const action = stringValue(payload.action) ?? 'updated';
   const pr = payload.pull_request as Record<string, unknown> | undefined;
-  const run = (payload.workflow_run ?? payload.check_run) as Record<string, unknown> | undefined;
-  const title = stringValue(pr?.title) ?? stringValue(run?.name) ?? event;
-  const url = stringValue(pr?.html_url) ?? stringValue(run?.html_url) ?? stringValue(payload.html_url);
-  let notificationEvent: FeishuEvent = 'ci_completed';
+  if (!pr) return undefined;
+  const title = stringValue(pr.title) ?? 'Pull request';
+  const url = stringValue(pr.html_url);
+  let notificationEvent: FeishuEvent = 'pr_updated';
   let status = action;
-  if (event === 'pull_request' && action === 'opened') notificationEvent = 'pr_created';
-  else if (event === 'pull_request' && action === 'closed' && pr?.merged === true) { notificationEvent = 'merged'; status = 'merged'; }
-  else if (event === 'pull_request' && action === 'closed') { notificationEvent = 'failed'; status = 'closed'; }
-  else if ((event === 'check_run' || event === 'workflow_run') && ['failure', 'cancelled', 'timed_out', 'action_required'].includes(action)) notificationEvent = 'failed';
-  else if (event === 'check_run' && stringValue(payload.check_suite ? (payload.check_suite as Record<string, unknown>).conclusion : undefined) === 'failure') notificationEvent = 'failed';
+  if (action === 'opened') notificationEvent = 'pr_created';
+  else if (action === 'closed' && pr.merged === true) { notificationEvent = 'merged'; status = 'merged'; }
+  else if (action === 'closed') { notificationEvent = 'failed'; status = 'closed'; }
   return { event: notificationEvent, project, status, summary: `${title} · GitHub ${event} ${action}`, url };
 }
 

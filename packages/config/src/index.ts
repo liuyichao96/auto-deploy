@@ -176,7 +176,6 @@ export const workflowTemplates: Record<string, string> = {
   'review.yml': `name: AI Review\non:\n  pull_request:\n    types: [opened, synchronize, reopened]\npermissions:\n  contents: read\njobs:\n  review:\n    if: github.event.pull_request.head.repo.fork == false\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with: { fetch-depth: 0 }\n      - uses: actions/setup-node@v4\n        with: { node-version: 22, cache: npm }\n      - run: npm ci\n      - name: Structured review\n        id: review\n        continue-on-error: true\n        run: npm run devflow -- review --output review-result.json\n      - name: Upload review result\n        if: always()\n        uses: actions/upload-artifact@v4\n        with:\n          name: review-result\n          path: review-result.json\n          if-no-files-found: error\n      - name: Fail when review blocks merge\n        if: steps.review.outcome == 'failure'\n        run: exit 1\n`,
   'review-publish.yml': reviewPublishTemplate,
   'auto-merge.yml': autoMergeTemplate,
-  'notify.yml': `name: Devflow Notify\non:\n  workflow_run:\n    workflows: [CI, AI Review]\n    types: [completed]\npermissions:\n  contents: read\njobs:\n  notify:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "Send summary to Feishu through the webhook service"\n`
 };
 
 export async function initProject(root: string, options: { docker?: boolean; devcontainer?: boolean } = {}) {
