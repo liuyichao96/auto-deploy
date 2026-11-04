@@ -1,7 +1,7 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-export type FeishuEvent = 'pr_created' | 'ci_completed' | 'review_completed' | 'merged' | 'failed';
+export type FeishuEvent = 'pr_created' | 'pr_updated' | 'ci_completed' | 'review_completed' | 'merged' | 'failed';
 export interface Notification { event: FeishuEvent; project: string; status: string; summary: string; url?: string; previewUrl?: string; }
 export interface FeishuSender { send(notification: Notification): Promise<void>; }
 
