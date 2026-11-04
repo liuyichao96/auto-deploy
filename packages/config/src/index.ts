@@ -158,7 +158,7 @@ jobs:
             const { data: pr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: pull.number });
             if (pr.head.repo?.full_name !== context.repo.owner + '/' + context.repo.repo) return;
             const checks = await github.paginate(github.rest.checks.listForRef, { owner: context.repo.owner, repo: context.repo.repo, ref: pr.head.sha, per_page: 100 });
-            // Default templates expose the required job checks as `checks` and `review`.
+            // Default templates expose the required job checks as checks and review.
             const required = new Map(['checks', 'review'].map(name => [name, false]));
             for (const check of checks) if (required.has(check.name.toLowerCase())) required.set(check.name.toLowerCase(), check.conclusion === 'success');
             if ([...required.values()].some(value => !value)) return;
