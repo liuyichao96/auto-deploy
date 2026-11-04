@@ -29,6 +29,7 @@ npm run devflow -- preview
 - [架构](docs/architecture.md)
 - [安全](docs/security.md)
 - [安装](docs/installation.md)
+- [用 Codex 接入 GitHub 项目](docs/codex-onboarding.md)
 - [运维](docs/operations.md)
 - [排障](docs/troubleshooting.md)
 
