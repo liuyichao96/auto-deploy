@@ -2,7 +2,14 @@ import crypto from 'node:crypto';
 import type { MergeStrategy } from '../../config/src/index.js';
 
 export interface PullRequestState { number: number; url: string; headSha: string; ciPassed: boolean; aiBlocks: boolean; approvals: number; conversationsResolved: boolean; }
-export interface GitHubClient { createOrUpdatePullRequest(input: { owner: string; repo: string; head: string; base: string; title: string; body: string }): Promise<{ number: number; url: string }>; enableAutoMerge(input: { owner: string; repo: string; number: number }): Promise<void>; }
+export interface PullRequestLookup { owner: string; repo: string; number: number; }
+export interface GitHubClient {
+  createOrUpdatePullRequest(input: { owner: string; repo: string; head: string; base: string; title: string; body: string }): Promise<{ number: number; url: string }>;
+  getPullRequestState(input: PullRequestLookup): Promise<PullRequestState>;
+  enableAutoMerge(input: PullRequestLookup): Promise<void>;
+  postIssueComment?(input: PullRequestLookup & { body: string }): Promise<void>;
+  createCheckRun?(input: PullRequestLookup & { headSha: string; name: string; conclusion: 'success' | 'failure' | 'neutral'; summary: string }): Promise<void>;
+}
 
 export function createAppJwt(appId: string, privateKey: string, nowSeconds = Math.floor(Date.now() / 1000)) {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -43,7 +50,46 @@ export class GitHubFetchClient implements GitHubClient {
       : await this.request(`/repos/${input.owner}/${input.repo}/pulls`, { method: 'POST', body: JSON.stringify({ head: input.head, base: input.base, title: input.title, body: input.body }), headers: { 'content-type': 'application/json' } }) as { number: number; html_url: string };
     return { number: response.number, url: response.html_url };
   }
-  async enableAutoMerge(input: { owner: string; repo: string; number: number }) {
+  async getPullRequestState(input: PullRequestLookup): Promise<PullRequestState> {
+    const pr = await this.request(`/repos/${input.owner}/${input.repo}/pulls/${input.number}`) as { html_url: string; head: { sha: string }; merged: boolean };
+    const [reviews, checks] = await Promise.all([
+      this.request(`/repos/${input.owner}/${input.repo}/pulls/${input.number}/reviews`) as Promise<Array<{ user?: { id?: number }; state: string }>>,
+      this.request(`/repos/${input.owner}/${input.repo}/commits/${pr.head.sha}/check-runs`) as Promise<{ check_runs?: Array<{ name: string; status: string; conclusion: string | null }> }>
+    ]);
+    const reviewCheck = checks.check_runs?.find(check => check.name.toLowerCase().includes('review'));
+    let conversationsResolved = true;
+    try {
+      const result = await this.graphql<{ repository?: { pullRequest?: { reviewThreads?: { nodes?: Array<{ isResolved: boolean }> } } } }>(
+        `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved}}}}}`,
+        { owner: input.owner, repo: input.repo, number: input.number }
+      );
+      conversationsResolved = (result.repository?.pullRequest?.reviewThreads?.nodes ?? []).every(thread => thread.isResolved);
+    } catch {
+      // REST-only tokens may not have GraphQL thread visibility; fail closed.
+      conversationsResolved = false;
+    }
+    const uniqueApprovers = new Set((reviews ?? []).filter(review => review.state === 'APPROVED').map(review => review.user?.id).filter((id): id is number => typeof id === 'number'));
+    const ciChecks = (checks.check_runs ?? []).filter(check => check.name.toLowerCase() !== 'review');
+    return {
+      number: input.number,
+      url: pr.html_url,
+      headSha: pr.head.sha,
+      ciPassed: ciChecks.length > 0 && ciChecks.every(check => check.status === 'completed' && ['success', 'skipped', 'neutral'].includes(check.conclusion ?? '')),
+      aiBlocks: reviewCheck?.status === 'completed' && reviewCheck.conclusion === 'failure',
+      approvals: uniqueApprovers.size,
+      conversationsResolved
+    };
+  }
+
+  async postIssueComment(input: PullRequestLookup & { body: string }): Promise<void> {
+    await this.request(`/repos/${input.owner}/${input.repo}/issues/${input.number}/comments`, { method: 'POST', body: JSON.stringify({ body: input.body }), headers: { 'content-type': 'application/json' } });
+  }
+
+  async createCheckRun(input: PullRequestLookup & { headSha: string; name: string; conclusion: 'success' | 'failure' | 'neutral'; summary: string }): Promise<void> {
+    await this.request(`/repos/${input.owner}/${input.repo}/check-runs`, { method: 'POST', body: JSON.stringify({ name: input.name, head_sha: input.headSha, status: 'completed', conclusion: input.conclusion, output: { title: input.name, summary: input.summary.slice(0, 65535) } }), headers: { 'content-type': 'application/json' } });
+  }
+
+  async enableAutoMerge(input: PullRequestLookup) {
     const query = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){id}}}`;
     const mutation = `mutation($pullRequestId:ID!){enablePullRequestAutoMerge(input:{pullRequestId:$pullRequestId,mergeMethod:SQUASH}){pullRequest{number}}}`;
     const response = await fetch('https://api.github.com/graphql', { method: 'POST', headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${this.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ query: `${query} ${mutation}`, variables: { owner: input.owner, repo: input.repo, number: input.number } }) });
@@ -51,4 +97,20 @@ export class GitHubFetchClient implements GitHubClient {
     const body = await response.json() as { errors?: Array<{ message: string }> };
     if (body.errors?.length) throw new Error(`GitHub auto-merge: ${body.errors.map(e => e.message).join('; ')}`);
   }
+
+  private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    const response = await fetch('https://api.github.com/graphql', { method: 'POST', headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${this.token}`, 'content-type': 'application/json', 'x-github-api-version': '2022-11-28' }, body: JSON.stringify({ query, variables }) });
+    if (!response.ok) throw new Error(`GitHub GraphQL ${response.status}`);
+    const body = await response.json() as { data?: T; errors?: Array<{ message: string }> };
+    if (body.errors?.length || !body.data) throw new Error(`GitHub GraphQL: ${body.errors?.map(e => e.message).join('; ') ?? '缺少 data'}`);
+    return body.data;
+  }
+}
+
+export async function autoMergeIfAllowed(client: Pick<GitHubClient, 'getPullRequestState' | 'enableAutoMerge'>, input: PullRequestLookup, strategy: MergeStrategy, requiredHumanApprovals = 1): Promise<boolean> {
+  if (strategy === 'manual') return false;
+  const state = await client.getPullRequestState(input);
+  if (!canMerge(state, strategy, requiredHumanApprovals)) return false;
+  await client.enableAutoMerge(input);
+  return true;
 }
