@@ -21,6 +21,8 @@ npm run devflow -- preview
 
 当前示例服务器的 Webhook 地址是 `http://43.142.20.161/devflow/webhooks/github`，健康检查是 `http://43.142.20.161/devflow/healthz`。正式环境请使用域名和 HTTPS。
 
+当前仓库已启用无人值守合并策略：AI Review 只生成结构化检查结果，CI 和 Review 均通过且对话已解决后，由可信的 `workflow_run` Job 请求 GitHub 原生 squash auto-merge。它不会伪造人工审批。仓库变量 `DEVFLOW_MERGE_STRATEGY=auto_after_ai_and_ci` 是显式开关；新项目默认仍要求人工审批。
+
 ## 文档
 
 - [产品需求](docs/product-requirements.md)

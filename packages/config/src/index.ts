@@ -126,10 +126,56 @@ jobs:
             else await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: pull.number, body });
 `;
 
+/**
+ * Trusted workflow_run job. It never checks out PR code and only enables
+ * GitHub's native squash auto-merge after maintainer-controlled checks pass.
+ * The repository variable is intentionally outside the PR so a contributor
+ * cannot change the merge policy from untrusted content.
+ */
+export const autoMergeTemplate = String.raw`name: Devflow Auto Merge
+on:
+  workflow_run:
+    workflows: [CI, AI Review]
+    types: [completed]
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  pull-requests: write
+jobs:
+  auto-merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      vars.DEVFLOW_MERGE_STRATEGY == 'auto_after_ai_and_ci'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const pull = run.pull_requests?.[0];
+            if (!pull) return;
+            const { data: pr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: pull.number });
+            if (pr.head.repo?.full_name !== context.repo.owner + '/' + context.repo.repo) return;
+            const checks = await github.paginate(github.rest.checks.listForRef, { owner: context.repo.owner, repo: context.repo.repo, ref: pr.head.sha, per_page: 100 });
+            // Default templates expose the required job checks as `checks` and `review`.
+            const required = new Map(['checks', 'review'].map(name => [name, false]));
+            for (const check of checks) if (required.has(check.name.toLowerCase())) required.set(check.name.toLowerCase(), check.conclusion === 'success');
+            if ([...required.values()].some(value => !value)) return;
+            const threads = await github.graphql(
+              'query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved}}}}}',
+              { owner: context.repo.owner, repo: context.repo.repo, number: pull.number }
+            );
+            if ((threads.repository.pullRequest.reviewThreads.nodes || []).some(thread => !thread.isResolved)) return;
+            const mutation = 'mutation($pullRequestId:ID!){enablePullRequestAutoMerge(input:{pullRequestId:$pullRequestId,mergeMethod:SQUASH}){pullRequest{number}}}';
+            await github.graphql(mutation, { pullRequestId: pr.node_id });
+`;
+
 export const workflowTemplates: Record<string, string> = {
   'ci.yml': `name: CI\non:\n  pull_request:\n  push:\n    branches: [main]\npermissions:\n  contents: read\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: 22, cache: npm }\n      - run: npm ci\n      - run: npm run lint --if-present\n      - run: npm run typecheck --if-present\n      - run: npm test --if-present\n      - run: npm run build --if-present\n`,
   'review.yml': `name: AI Review\non:\n  pull_request:\n    types: [opened, synchronize, reopened]\npermissions:\n  contents: read\njobs:\n  review:\n    if: github.event.pull_request.head.repo.fork == false\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with: { fetch-depth: 0 }\n      - uses: actions/setup-node@v4\n        with: { node-version: 22, cache: npm }\n      - run: npm ci\n      - name: Structured review\n        id: review\n        continue-on-error: true\n        run: npm run devflow -- review --output review-result.json\n      - name: Upload review result\n        if: always()\n        uses: actions/upload-artifact@v4\n        with:\n          name: review-result\n          path: review-result.json\n          if-no-files-found: error\n      - name: Fail when review blocks merge\n        if: steps.review.outcome == 'failure'\n        run: exit 1\n`,
   'review-publish.yml': reviewPublishTemplate,
+  'auto-merge.yml': autoMergeTemplate,
   'notify.yml': `name: Devflow Notify\non:\n  workflow_run:\n    workflows: [CI, AI Review]\n    types: [completed]\npermissions:\n  contents: read\njobs:\n  notify:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "Send summary to Feishu through the webhook service"\n`
 };
 

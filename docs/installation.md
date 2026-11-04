@@ -17,3 +17,5 @@ docker compose -f docker-compose.yml -f deploy/docker-compose.server.yml up -d
 ```
 
 健康检查地址为 `/devflow/healthz`，Webhook 地址为 `/devflow/webhooks/github`。服务器当前运行在 `http://43.142.20.161`，已配置随机 Webhook secret 并仅接收 GitHub 事件；Feishu、GitHub App 和 OpenAI 配置保持为空。生产使用前，应给 Nginx 配置域名和 HTTPS。接收事件审计记录写入容器内 `.devflow/webhook-audit.jsonl`，该目录已被 Git 忽略。
+
+如需无人值守合并，在 GitHub 仓库 Settings → Secrets and variables → Actions → Variables 中设置 `DEVFLOW_MERGE_STRATEGY` 为 `auto_after_ai_and_ci`，并将 `main` 分支保护调整为要求 `checks`、`review` 和已解决对话，不再要求人工审批。该操作是显式的仓库策略变更；AI 仍只发布 Review Check 和评论。

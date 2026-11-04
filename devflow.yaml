@@ -13,8 +13,10 @@ preview:
   healthPath: /healthz
   timeoutMs: 30000
 github:
-  mergeStrategy: auto_after_human_approval
-  requiredHumanApprovals: 1
+  # 无人值守模式：AI Review 与 CI 通过后启用 GitHub 原生 squash auto-merge。
+  # 该策略由仓库变量 DEVFLOW_MERGE_STRATEGY 显式开启，AI 不提交伪造的人工 Approve。
+  mergeStrategy: auto_after_ai_and_ci
+  requiredHumanApprovals: 0
 feishu:
   enabled: false
   projectGroups: {}
