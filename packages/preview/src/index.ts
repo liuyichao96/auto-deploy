@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import net from 'node:net';
+import { parseCommand } from '../../config/src/index.js';
 
 export interface PreviewOptions { command: string; port: number; healthPath?: string; timeoutMs?: number; cwd?: string; env?: NodeJS.ProcessEnv; detached?: boolean; }
 export interface PreviewSession { url: string; pid?: number; logs: string[]; stop(): Promise<void>; }
@@ -8,13 +9,11 @@ export function isPortAvailable(port: number, host = '127.0.0.1'): Promise<boole
   return new Promise(resolve => { const server = net.createServer().once('error', () => resolve(false)).once('listening', () => server.close(() => resolve(true))).listen(port, host); });
 }
 
-function splitCommand(command: string) { const parts = command.trim().split(/\s+/); return { executable: parts.shift() ?? '', args: parts }; }
-
 export async function startPreview(options: PreviewOptions): Promise<PreviewSession> {
   if (!(await isPortAvailable(options.port))) throw new Error(`预览端口 ${options.port} 已被占用，请修改 devflow.yaml 或停止占用进程`);
-  const { executable, args } = splitCommand(options.command);
-  if (!executable) throw new Error('preview.command 不能为空');
-  const child = spawn(executable, args, { cwd: options.cwd, env: { ...process.env, ...options.env, PORT: String(options.port) }, shell: process.platform === 'win32', detached: options.detached });
+  const parsed = parseCommand(options.command, 'preview.command');
+  const executable = process.platform === 'win32' && ['npm', 'npx', 'pnpm', 'yarn'].includes(parsed.executable) ? `${parsed.executable}.cmd` : parsed.executable;
+  const child = spawn(executable, parsed.args, { cwd: options.cwd, env: { ...process.env, ...options.env, PORT: String(options.port) }, shell: process.platform === 'win32' && executable.endsWith('.cmd'), detached: options.detached });
   const logs: string[] = [];
   child.stdout?.on('data', d => logs.push(String(d)));
   child.stderr?.on('data', d => logs.push(String(d)));
